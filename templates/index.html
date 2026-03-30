@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Legal Document AI Analyzer</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <!-- ── Header ── -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">⚖️</span>
+        <div>
+          <h1>Legal Document AI Analyzer</h1>
+          <p class="tagline">Upload · Summarize · Detect Risks · Check Originality</p>
+        </div>
+      </div>
+      <div id="aiStatus" class="ai-badge ai-badge--loading">Checking AI…</div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ── Upload Card ── -->
+    <section class="card upload-card">
+      <h2 class="card-title">📄 Upload Your Document</h2>
+      <p class="card-subtitle">Supports PDF, DOCX, and TXT files (max 16 MB)</p>
+
+      <div id="dropZone" class="drop-zone" role="button" tabindex="0"
+           aria-label="Drop a file here or click to browse">
+        <div class="drop-zone__icon">📂</div>
+        <p class="drop-zone__text">Drag &amp; drop your file here</p>
+        <p class="drop-zone__sub">or click to browse</p>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.txt"
+               class="drop-zone__input" aria-hidden="true" />
+      </div>
+
+      <div id="fileInfo" class="file-info hidden">
+        <span id="fileName" class="file-name"></span>
+        <button id="clearFile" class="btn btn--ghost btn--sm" aria-label="Remove file">✕</button>
+      </div>
+
+      <button id="analyzeBtn" class="btn btn--primary btn--full" disabled>
+        <span id="analyzeBtnText">Analyze Document</span>
+        <span id="analyzeSpinner" class="spinner hidden" aria-hidden="true"></span>
+      </button>
+    </section>
+
+    <!-- ── Results ── -->
+    <div id="results" class="results hidden">
+
+      <!-- Summary -->
+      <section class="card result-card" id="summaryCard">
+        <div class="card-header">
+          <h2 class="card-title">📝 Plain-Language Summary</h2>
+          <div class="voice-controls">
+            <button id="speakBtn" class="btn btn--icon" title="Read summary aloud" aria-label="Read summary aloud">
+              🔊
+            </button>
+            <button id="stopBtn" class="btn btn--icon hidden" title="Stop speech" aria-label="Stop speech">
+              ⏹
+            </button>
+            <button id="serverVoiceBtn" class="btn btn--icon" title="Download audio (gTTS)" aria-label="Download audio">
+              💾
+            </button>
+          </div>
+        </div>
+        <p id="summaryText" class="result-text"></p>
+        <div class="doc-meta">
+          <span id="wordCount" class="meta-badge"></span>
+          <span id="fileName2" class="meta-badge"></span>
+        </div>
+      </section>
+
+      <!-- Risk Analysis -->
+      <section class="card result-card" id="riskCard">
+        <h2 class="card-title">⚠️ Risk Analysis</h2>
+        <div class="risk-header">
+          <div class="risk-meter-wrap">
+            <canvas id="riskGauge" width="160" height="90" aria-label="Risk gauge"></canvas>
+            <p id="riskLabel" class="risk-label"></p>
+          </div>
+          <div class="risk-score-wrap">
+            <span class="risk-score-num" id="riskScore">0</span>
+            <span class="risk-score-label">/ 100</span>
+          </div>
+        </div>
+        <div id="riskList" class="risk-list"></div>
+      </section>
+
+      <!-- Originality -->
+      <section class="card result-card" id="originalityCard">
+        <h2 class="card-title">🔍 Originality Check</h2>
+        <div class="originality-header">
+          <div class="originality-donut-wrap">
+            <canvas id="originalityDonut" width="140" height="140" aria-label="Originality score"></canvas>
+            <span class="donut-center" id="originalityPct"></span>
+          </div>
+          <div class="originality-info">
+            <p class="verdict-label" id="verdictLabel"></p>
+            <ul id="findingsList" class="findings-list"></ul>
+            <p class="fingerprint-label">
+              Document fingerprint: <code id="fingerprint"></code>
+            </p>
+          </div>
+        </div>
+      </section>
+
+    </div><!-- /results -->
+
+    <!-- ── Error Banner ── -->
+    <div id="errorBanner" class="error-banner hidden" role="alert"></div>
+
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      Powered by <strong>Flask</strong> &amp; <strong>OpenAI</strong> (optional) ·
+      <a href="https://github.com/chaithu-creator/new-legal-document-AI-Analyzer"
+         target="_blank" rel="noopener">GitHub</a>
+    </p>
+  </footer>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
