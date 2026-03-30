@@ -1,0 +1,25 @@
+{
+  "name": "lexintel-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "axios": "^1.6.8",
+    "chart.js": "^4.4.2",
+    "lucide-react": "^0.368.0",
+    "react": "^18.2.0",
+    "react-chartjs-2": "^5.2.0",
+    "react-dom": "^18.2.0",
+    "react-dropzone": "^14.2.3"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.2.0"
+  },
+  "scripts": {
+    "start": "vite --port 3000",
+    "dev": "vite --port 3000",
+    "build": "vite build",
+    "preview": "vite preview"
+  }
+}
