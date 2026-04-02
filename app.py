@@ -249,25 +249,28 @@ def _is_safe_url(url: str) -> bool:
         if not hostname:
             return False
 
-        # Block obviously internal hostnames
-        internal_patterns = (
-            "localhost", "127.", "0.0.0.0", "::1",
-            "169.254.", "10.", "172.16.", "172.17.", "172.18.",
-            "172.19.", "172.20.", "172.21.", "172.22.", "172.23.",
-            "172.24.", "172.25.", "172.26.", "172.27.", "172.28.",
-            "172.29.", "172.30.", "172.31.", "192.168.",
-        )
-        if any(hostname.lower().startswith(p) or hostname.lower() == p.rstrip(".") for p in internal_patterns):
+        # Block IP-address-style hostnames that are private ranges
+        # Only apply pattern matching when the hostname looks like an IP address.
+        # Domain names are handled by the DNS lookup below.
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+        except ValueError:
+            pass  # hostname is a domain name, not an IP literal
+
+        # Also block "localhost" and explicit loopback domains
+        if hostname.lower() in ("localhost", "ip6-localhost", "ip6-loopback"):
             return False
 
-        # Attempt DNS lookup; if it succeeds, validate the IP
+        # Attempt DNS lookup; if it succeeds, validate the resolved IP
         try:
             ip_str = socket.gethostbyname(hostname)
             ip = ipaddress.ip_address(ip_str)
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
                 return False
         except OSError:
-            # DNS unavailable — rely on hostname pattern checks above
+            # DNS unavailable — rely on the IP-literal check above
             pass
 
         return True
@@ -285,15 +288,30 @@ def extract_text_from_url(url: str) -> str:
         url,
         timeout=10,
         stream=True,
+        allow_redirects=False,          # prevent redirect-based SSRF
         headers={"User-Agent": "LegalDocAnalyzer/1.0"},
     )
+    # Follow only safe redirects (re-validate each hop)
+    while resp.is_redirect:
+        location = resp.headers.get("Location", "")
+        if not _is_safe_url(location):
+            raise ValueError("Redirect to a disallowed address blocked.")
+        resp = http_requests.get(
+            location,
+            timeout=10,
+            stream=True,
+            allow_redirects=False,
+            headers={"User-Agent": "LegalDocAnalyzer/1.0"},
+        )
     resp.raise_for_status()
-    # Limit download size to 2 MB
+    # Limit download size to 2 MB; close connection on overflow
     content = b""
+    MAX_BYTES = 2 * 1024 * 1024
     for chunk in resp.iter_content(chunk_size=8192):
         content += chunk
-        if len(content) > 2 * 1024 * 1024:
-            break
+        if len(content) > MAX_BYTES:
+            resp.close()
+            raise ValueError("URL content too large (max 2 MB).")
     soup = BeautifulSoup(content, "lxml")
     for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
@@ -681,7 +699,12 @@ def create_annotated_image(filepath: str, risks: dict, violations: dict) -> byte
                         sev = severity_map.get(kw, "Medium")
                         color = COLORS.get(sev, COLORS["Medium"])
                         x, y, w, h = wp["x"], wp["y"], wp["w"], wp["h"]
-                        draw_orig.rectangle([x - 2, y - 2, x + w + 2, y + h + 2], fill=color)
+                        # Clamp coordinates to non-negative values
+                        x1 = max(0, x - 2)
+                        y1 = max(0, y - 2)
+                        x2 = x + w + 2
+                        y2 = y + h + 2
+                        draw_orig.rectangle([x1, y1, x2, y2], fill=color)
                         break
 
         # Build annotation panel
@@ -949,8 +972,10 @@ def analyze():
     """Analyze a document (file upload or URL) and return full analysis."""
     _cleanup_sessions()
 
-    region   = (request.form.get("region") or request.json.get("region") if request.is_json else request.form.get("region")) or "India"
-    region   = region.strip()[:64]
+    region = request.form.get("region") or (
+        (request.get_json(silent=True) or {}).get("region")
+    ) or "India"
+    region = region.strip()[:64]
 
     input_url      = None
     filepath       = None
@@ -967,8 +992,8 @@ def analyze():
             text = extract_text_from_url(url_input)
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
-        except Exception as e:
-            return jsonify({"error": f"Failed to fetch URL: {str(e)}"}), 422
+        except Exception:
+            return jsonify({"error": "Failed to fetch URL. Please check the link and try again."}), 422
         if not text.strip():
             return jsonify({"error": "Could not extract any text from the URL."}), 422
         input_url = url_input
@@ -990,12 +1015,13 @@ def analyze():
         file.save(filepath)
 
         if file_ext in IMAGE_EXTENSIONS:
-            original_bytes = open(filepath, "rb").read()
+            with open(filepath, "rb") as img_f:
+                original_bytes = img_f.read()
 
         try:
             text = extract_text(filepath, filename)
-        except Exception as exc:
-            return jsonify({"error": f"Failed to read document: {str(exc)}"}), 422
+        except Exception:
+            return jsonify({"error": "Failed to read document. Please ensure the file is not corrupted."}), 422
 
     else:
         return jsonify({"error": "Please upload a file or provide a URL."}), 400
@@ -1003,9 +1029,11 @@ def analyze():
     if not text.strip():
         if filepath and os.path.exists(filepath):
             os.remove(filepath)
-        return jsonify({"error": "Document appears to be empty or unreadable. "
-                        "For images, ensure the text is legible. "
-                        "An OpenAI API key enables Vision-based OCR."}), 422
+        return jsonify({"error": (
+            "Document is empty or unreadable. "
+            "For images, ensure the text is legible. "
+            "An OpenAI API key enables Vision-based OCR."
+        )}), 422
 
     # ── Run analyses ──
     summary    = generate_summary(text)
@@ -1069,10 +1097,10 @@ def analyze():
 @app.route("/api/download/<session_id>")
 def download_annotated(session_id):
     """Download the annotated document for a given session."""
-    # Validate session_id format (hex only)
-    if not re.fullmatch(r"[0-9a-f]{32}", session_id):
+    # Validate session_id format (hex, case-insensitive)
+    if not re.fullmatch(r"[0-9a-fA-F]{32}", session_id):
         return jsonify({"error": "Invalid session ID."}), 400
-    session = _sessions.get(session_id)
+    session = _sessions.get(session_id.lower())
     if not session:
         return jsonify({"error": "Session not found or expired."}), 404
     data  = session.get("annotated_bytes")
@@ -1103,10 +1131,10 @@ def chat():
     if len(message) > 2000:
         return jsonify({"error": "Message too long (max 2000 characters)."}), 400
 
-    # Validate session_id
+    # Validate session_id (accept both upper and lower hex to be robust)
     doc_context = ""
-    if session_id and re.fullmatch(r"[0-9a-f]{32}", session_id):
-        session = _sessions.get(session_id)
+    if session_id and re.fullmatch(r"[0-9a-fA-F]{32}", session_id):
+        session = _sessions.get(session_id.lower())
         if session:
             doc_context = session.get("text", "")
             region      = session.get("region", region)
@@ -1140,8 +1168,8 @@ def voice():
         tts.write_to_fp(mp3_fp)
         mp3_fp.seek(0)
         return send_file(mp3_fp, mimetype="audio/mpeg", as_attachment=False)
-    except Exception as exc:
-        return jsonify({"error": f"TTS generation failed: {str(exc)}"}), 500
+    except Exception:
+        return jsonify({"error": "TTS generation failed. Please try again."}), 500
 
 
 @app.route("/api/health")

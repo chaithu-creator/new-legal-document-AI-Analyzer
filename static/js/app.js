@@ -4,7 +4,8 @@
 
 'use strict';
 
-// ── DOM references ────────────────────────────────────────────────
+// Number of chat turns retained client-side (backend uses the last 10)
+const MAX_CHAT_HISTORY = 20;
 
 // Upload
 const dropZone       = document.getElementById('dropZone');
@@ -289,7 +290,7 @@ function renderViolations(violationsData) {
       <p class="violation-rule">⚖ ${escapeHtml(v.rule || 'Unknown Rule')}</p>
       ${v.clause ? `<p class="violation-clause">${escapeHtml(v.clause)}</p>` : ''}
       <p class="violation-issue">${escapeHtml(v.issue || '')}</p>
-      ${v.suggestion ? `<div class="violation-suggestion"><strong>💡 Suggestion</strong>${escapeHtml(v.suggestion)}</div>` : ''}
+      ${v.suggestion ? `<div class="violation-suggestion"><strong>💡 Suggestion:</strong> ${escapeHtml(v.suggestion)}</div>` : ''}
     </div>
   `).join('');
 }
@@ -412,7 +413,7 @@ async function sendChatMessage() {
     appendChatMsg(reply, 'bot');
     chatHistory.push({ role: 'user',      content: msg   });
     chatHistory.push({ role: 'assistant', content: reply });
-    if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+    if (chatHistory.length > MAX_CHAT_HISTORY) chatHistory = chatHistory.slice(-MAX_CHAT_HISTORY);
   } catch {
     typingEl.remove();
     appendChatMsg('Sorry, there was a network error.', 'bot');
