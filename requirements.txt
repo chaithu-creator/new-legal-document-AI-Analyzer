@@ -7,7 +7,7 @@ gTTS==2.5.1
 python-dotenv==1.0.1
 gunicorn==22.0.0
 Werkzeug==3.0.3
-Pillow==10.3.0
+Pillow==12.1.1
 pytesseract==0.3.10
 requests==2.31.0
 beautifulsoup4==4.12.3
