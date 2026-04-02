@@ -3,43 +3,78 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Legal Document AI Analyzer</title>
+  <title>AI Legal Risk Analyzer</title>
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body>
+
   <!-- ── Header ── -->
   <header class="site-header">
     <div class="header-inner">
       <div class="logo">
         <span class="logo-icon">⚖️</span>
         <div>
-          <h1>Legal Document AI Analyzer</h1>
-          <p class="tagline">Upload · Summarize · Detect Risks · Check Originality</p>
+          <h1>AI Legal Risk Analyzer</h1>
+          <p class="tagline">Understand your agreements · Detect risks · Stay informed</p>
         </div>
       </div>
-      <div id="aiStatus" class="ai-badge ai-badge--loading">Checking AI…</div>
+      <div class="header-right">
+        <select id="regionSelect" class="region-select" title="Select your region for localized law checks">
+          <option value="India" selected>🇮🇳 India</option>
+          <option value="USA">🇺🇸 USA</option>
+          <option value="UK">🇬🇧 UK</option>
+          <option value="General">🌐 General</option>
+        </select>
+        <div id="aiStatus" class="ai-badge ai-badge--loading">Checking AI…</div>
+      </div>
     </div>
   </header>
+
+  <!-- ── Disclaimer Banner ── -->
+  <div class="disclaimer-bar">
+    ⚠️ <strong>AI-assisted insights only — not legal advice.</strong>
+    Always consult a qualified lawyer before signing any agreement.
+    Your documents are processed in memory and never stored.
+  </div>
 
   <main class="container">
 
     <!-- ── Upload Card ── -->
     <section class="card upload-card">
       <h2 class="card-title">📄 Upload Your Document</h2>
-      <p class="card-subtitle">Supports PDF, DOCX, and TXT files (max 16 MB)</p>
+      <p class="card-subtitle">Supports PDF, DOCX, TXT, Images (JPG/PNG/…), and URLs — max 16 MB</p>
 
-      <div id="dropZone" class="drop-zone" role="button" tabindex="0"
-           aria-label="Drop a file here or click to browse">
-        <div class="drop-zone__icon">📂</div>
-        <p class="drop-zone__text">Drag &amp; drop your file here</p>
-        <p class="drop-zone__sub">or click to browse</p>
-        <input type="file" id="fileInput" accept=".pdf,.docx,.txt"
-               class="drop-zone__input" aria-hidden="true" />
+      <!-- Input tabs -->
+      <div class="input-tabs" role="tablist">
+        <button class="tab-btn tab-btn--active" role="tab" data-tab="file" aria-selected="true">📁 File Upload</button>
+        <button class="tab-btn" role="tab" data-tab="url" aria-selected="false">🔗 URL / Link</button>
       </div>
 
-      <div id="fileInfo" class="file-info hidden">
-        <span id="fileName" class="file-name"></span>
-        <button id="clearFile" class="btn btn--ghost btn--sm" aria-label="Remove file">✕</button>
+      <!-- File tab -->
+      <div id="tabFile" class="tab-panel">
+        <div id="dropZone" class="drop-zone" role="button" tabindex="0"
+             aria-label="Drop a file here or click to browse">
+          <div class="drop-zone__icon">📂</div>
+          <p class="drop-zone__text">Drag &amp; drop your file here</p>
+          <p class="drop-zone__sub">PDF · DOCX · TXT · JPG · PNG · and more</p>
+          <input type="file" id="fileInput"
+                 accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,.gif,.bmp,.tiff,.tif,.webp"
+                 class="drop-zone__input" aria-hidden="true" />
+        </div>
+        <div id="fileInfo" class="file-info hidden">
+          <span id="fileName" class="file-name"></span>
+          <button id="clearFile" class="btn btn--ghost btn--sm" aria-label="Remove file">✕</button>
+        </div>
+      </div>
+
+      <!-- URL tab -->
+      <div id="tabUrl" class="tab-panel hidden">
+        <div class="url-input-wrap">
+          <input type="url" id="urlInput" class="url-input"
+                 placeholder="https://docs.google.com/... or any webpage URL"
+                 aria-label="URL of the legal document" />
+        </div>
+        <p class="input-hint">Only public HTTP/HTTPS URLs are supported.</p>
       </div>
 
       <button id="analyzeBtn" class="btn btn--primary btn--full" disabled>
@@ -48,49 +83,76 @@
       </button>
     </section>
 
+    <!-- ── Error Banner ── -->
+    <div id="errorBanner" class="error-banner hidden" role="alert"></div>
+
     <!-- ── Results ── -->
     <div id="results" class="results hidden">
 
-      <!-- Summary -->
+      <!-- ── Meta bar ── -->
+      <div class="result-meta-bar">
+        <span id="metaFile" class="meta-pill">📄 —</span>
+        <span id="metaWords" class="meta-pill">📝 — words</span>
+        <span id="metaRegion" class="meta-pill">📍 —</span>
+        <span id="metaAI" class="meta-pill">🤖 —</span>
+        <button id="downloadBtn" class="btn btn--outline btn--sm hidden">
+          ⬇ Download Annotated
+        </button>
+      </div>
+
+      <!-- ── Risk Score Hero ── -->
+      <section class="card risk-hero-card" id="riskHeroCard">
+        <div class="risk-hero">
+          <div class="risk-gauge-wrap">
+            <canvas id="riskGauge" width="180" height="100" aria-label="Risk gauge"></canvas>
+            <p id="riskLabel" class="risk-hero-label"></p>
+          </div>
+          <div class="risk-hero-info">
+            <div class="risk-score-row">
+              <span class="risk-score-num" id="riskScore">0</span>
+              <span class="risk-score-denom">/100</span>
+            </div>
+            <p class="risk-score-caption" id="riskCaption"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Summary ── -->
       <section class="card result-card" id="summaryCard">
         <div class="card-header">
           <h2 class="card-title">📝 Plain-Language Summary</h2>
           <div class="voice-controls">
-            <button id="speakBtn" class="btn btn--icon" title="Read summary aloud" aria-label="Read summary aloud">
-              🔊
-            </button>
-            <button id="stopBtn" class="btn btn--icon hidden" title="Stop speech" aria-label="Stop speech">
-              ⏹
-            </button>
-            <button id="serverVoiceBtn" class="btn btn--icon" title="Download audio (gTTS)" aria-label="Download audio">
-              💾
-            </button>
+            <button id="speakBtn" class="btn btn--icon" title="Read summary aloud" aria-label="Read summary aloud">🔊</button>
+            <button id="stopBtn" class="btn btn--icon hidden" title="Stop speech" aria-label="Stop speech">⏹</button>
+            <button id="serverVoiceBtn" class="btn btn--icon" title="Download audio" aria-label="Download audio">💾</button>
           </div>
         </div>
         <p id="summaryText" class="result-text"></p>
-        <div class="doc-meta">
-          <span id="wordCount" class="meta-badge"></span>
-          <span id="fileName2" class="meta-badge"></span>
-        </div>
       </section>
 
-      <!-- Risk Analysis -->
+      <!-- ── Risk Analysis ── -->
       <section class="card result-card" id="riskCard">
         <h2 class="card-title">⚠️ Risk Analysis</h2>
-        <div class="risk-header">
-          <div class="risk-meter-wrap">
-            <canvas id="riskGauge" width="160" height="90" aria-label="Risk gauge"></canvas>
-            <p id="riskLabel" class="risk-label"></p>
-          </div>
-          <div class="risk-score-wrap">
-            <span class="risk-score-num" id="riskScore">0</span>
-            <span class="risk-score-label">/ 100</span>
-          </div>
-        </div>
         <div id="riskList" class="risk-list"></div>
       </section>
 
-      <!-- Originality -->
+      <!-- ── Rule Violations ── -->
+      <section class="card result-card" id="violationsCard">
+        <div class="card-header">
+          <h2 class="card-title">🚨 Rule &amp; Law Violations</h2>
+          <span id="complianceScore" class="compliance-badge"></span>
+        </div>
+        <div id="violationsList" class="violations-list"></div>
+      </section>
+
+      <!-- ── Clause Simplifier ── -->
+      <section class="card result-card" id="simplifyCard">
+        <h2 class="card-title">💡 Simplified Clauses</h2>
+        <p class="card-subtitle">Complex legal language explained in plain English</p>
+        <div id="simplifyList" class="simplify-list"></div>
+      </section>
+
+      <!-- ── Originality ── -->
       <section class="card result-card" id="originalityCard">
         <h2 class="card-title">🔍 Originality Check</h2>
         <div class="originality-header">
@@ -101,23 +163,52 @@
           <div class="originality-info">
             <p class="verdict-label" id="verdictLabel"></p>
             <ul id="findingsList" class="findings-list"></ul>
-            <p class="fingerprint-label">
-              Document fingerprint: <code id="fingerprint"></code>
-            </p>
+            <p class="fingerprint-label">Fingerprint: <code id="fingerprint"></code></p>
           </div>
         </div>
       </section>
 
     </div><!-- /results -->
 
-    <!-- ── Error Banner ── -->
-    <div id="errorBanner" class="error-banner hidden" role="alert"></div>
-
   </main>
+
+  <!-- ── Chatbot toggle button ── -->
+  <button id="chatToggle" class="chat-toggle" aria-label="Open legal assistant chat">
+    💬 <span class="chat-toggle-label">Legal Assistant</span>
+  </button>
+
+  <!-- ── Chatbot Panel ── -->
+  <aside id="chatPanel" class="chat-panel" aria-label="Legal assistant chat" hidden>
+    <div class="chat-panel-header">
+      <div class="chat-panel-title">
+        <span>⚖️</span>
+        <div>
+          <strong>Legal Assistant</strong>
+          <p id="chatMode" class="chat-mode">General Mode</p>
+        </div>
+      </div>
+      <button id="chatClose" class="btn btn--ghost btn--sm" aria-label="Close chat">✕</button>
+    </div>
+    <div id="chatMessages" class="chat-messages" role="log" aria-live="polite">
+      <div class="chat-msg chat-msg--bot">
+        <div class="chat-bubble">
+          👋 Hello! I'm your legal assistant. Upload a document and I'll answer questions about it, or ask me anything about legal terms and agreements.<br><br>
+          <em>Note: I provide information only — not legal advice.</em>
+        </div>
+      </div>
+    </div>
+    <div class="chat-input-wrap">
+      <input id="chatInput" type="text" class="chat-input"
+             placeholder="Ask about your document…" maxlength="2000"
+             aria-label="Chat message" />
+      <button id="chatSend" class="btn btn--primary chat-send-btn" aria-label="Send message">➤</button>
+    </div>
+  </aside>
 
   <footer class="site-footer">
     <p>
-      Powered by <strong>Flask</strong> &amp; <strong>OpenAI</strong> (optional) ·
+      AI-Powered Legal Risk Analyzer ·
+      <strong>Not legal advice</strong> · Documents never stored ·
       <a href="https://github.com/chaithu-creator/new-legal-document-AI-Analyzer"
          target="_blank" rel="noopener">GitHub</a>
     </p>
