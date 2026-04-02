@@ -47,11 +47,18 @@ except ImportError:
 
 # OCR
 try:
+    import pytesseract as _pytesseract_module
+
+    def _check_tesseract() -> bool:
+        try:
+            _pytesseract_module.get_tesseract_version()
+            return True
+        except Exception:
+            return False
+
     import pytesseract
-    # Verify the tesseract binary is actually available
-    pytesseract.get_tesseract_version()
-    _TESSERACT_AVAILABLE = True
-except Exception:
+    _TESSERACT_AVAILABLE = _check_tesseract()
+except ImportError:
     _TESSERACT_AVAILABLE = False
 
 # PDF annotation
@@ -234,12 +241,14 @@ def _get_image_word_positions(filepath: str) -> list:
 # ---------------------------------------------------------------------------
 
 def _is_safe_url(url: str) -> bool:
-    """Block private/loopback IPs and non-HTTP(S) schemes.
+    """Return True only if the URL is safe to fetch (public HTTP/HTTPS, non-private IP).
 
-    If DNS resolution fails (e.g. offline environment), we still block
-    obviously dangerous patterns (localhost, 127.*, 192.168.*, etc.) via
-    hostname string matching and allow the rest through. The downstream
-    request timeout will protect against slow connections.
+    Blocks:
+    - Non-HTTP(S) schemes
+    - IP literals in private/loopback/link-local/reserved ranges
+    - 'localhost' and loopback hostname aliases
+    - Domains whose DNS resolves to private IPs
+    - Domains when DNS resolution is unavailable (conservative rejection)
     """
     try:
         parsed = urlparse(url)
@@ -249,29 +258,28 @@ def _is_safe_url(url: str) -> bool:
         if not hostname:
             return False
 
-        # Block IP-address-style hostnames that are private ranges
-        # Only apply pattern matching when the hostname looks like an IP address.
-        # Domain names are handled by the DNS lookup below.
+        # If the hostname is a numeric IP literal, validate it directly
         try:
             ip = ipaddress.ip_address(hostname)
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
                 return False
+            return True  # valid public IP literal — no DNS needed
         except ValueError:
-            pass  # hostname is a domain name, not an IP literal
+            pass  # not an IP literal — continue with domain-name checks
 
-        # Also block "localhost" and explicit loopback domains
+        # Block explicit loopback/localhost domain names
         if hostname.lower() in ("localhost", "ip6-localhost", "ip6-loopback"):
             return False
 
-        # Attempt DNS lookup; if it succeeds, validate the resolved IP
+        # Resolve the hostname; reject conservatively if DNS is unavailable
         try:
             ip_str = socket.gethostbyname(hostname)
-            ip = ipaddress.ip_address(ip_str)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            resolved = ipaddress.ip_address(ip_str)
+            if resolved.is_private or resolved.is_loopback or resolved.is_link_local or resolved.is_reserved:
                 return False
         except OSError:
-            # DNS unavailable — rely on the IP-literal check above
-            pass
+            # DNS unavailable — reject to be conservative
+            return False
 
         return True
     except Exception:
@@ -291,8 +299,12 @@ def extract_text_from_url(url: str) -> str:
         allow_redirects=False,          # prevent redirect-based SSRF
         headers={"User-Agent": "LegalDocAnalyzer/1.0"},
     )
-    # Follow only safe redirects (re-validate each hop)
+    # Follow only safe redirects (re-validate each hop), limit to 5 hops
+    MAX_REDIRECTS = 5
+    redirect_count = 0
     while resp.is_redirect:
+        if redirect_count >= MAX_REDIRECTS:
+            raise ValueError("Too many redirects (max 5).")
         location = resp.headers.get("Location", "")
         if not _is_safe_url(location):
             raise ValueError("Redirect to a disallowed address blocked.")
@@ -303,6 +315,7 @@ def extract_text_from_url(url: str) -> str:
             allow_redirects=False,
             headers={"User-Agent": "LegalDocAnalyzer/1.0"},
         )
+        redirect_count += 1
     resp.raise_for_status()
     # Limit download size to 2 MB; close connection on overflow
     content = b""
@@ -699,11 +712,11 @@ def create_annotated_image(filepath: str, risks: dict, violations: dict) -> byte
                         sev = severity_map.get(kw, "Medium")
                         color = COLORS.get(sev, COLORS["Medium"])
                         x, y, w, h = wp["x"], wp["y"], wp["w"], wp["h"]
-                        # Clamp coordinates to non-negative values
+                        # Clamp all coordinates to image boundaries
                         x1 = max(0, x - 2)
                         y1 = max(0, y - 2)
-                        x2 = x + w + 2
-                        y2 = y + h + 2
+                        x2 = min(img.width,  x + w + 2)
+                        y2 = min(img.height, y + h + 2)
                         draw_orig.rectangle([x1, y1, x2, y2], fill=color)
                         break
 
@@ -911,8 +924,8 @@ def _chatbot_response(message: str, doc_context: str, chat_history: list, region
                 temperature=0.5,
             )
             return response.choices[0].message.content.strip()
-        except Exception as e:
-            return f"Sorry, I couldn't process your question right now. ({e})"
+        except Exception:
+            return "Sorry, I couldn't process your question right now. Please try again."
 
     return _heuristic_chat_response(message, doc_context)
 
@@ -990,8 +1003,9 @@ def analyze():
             return jsonify({"error": "URL analysis is not available on this server."}), 503
         try:
             text = extract_text_from_url(url_input)
-        except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+        except ValueError as ve:
+            # ValueError messages are controlled by our own code and safe to expose
+            return jsonify({"error": ve.args[0] if ve.args else "Invalid URL."}), 400
         except Exception:
             return jsonify({"error": "Failed to fetch URL. Please check the link and try again."}), 422
         if not text.strip():
@@ -1131,10 +1145,11 @@ def chat():
     if len(message) > 2000:
         return jsonify({"error": "Message too long (max 2000 characters)."}), 400
 
-    # Validate session_id (accept both upper and lower hex to be robust)
+    # Validate and normalise session_id (accept both upper and lower hex)
     doc_context = ""
     if session_id and re.fullmatch(r"[0-9a-fA-F]{32}", session_id):
-        session = _sessions.get(session_id.lower())
+        normalised_sid = session_id.lower()
+        session = _sessions.get(normalised_sid)
         if session:
             doc_context = session.get("text", "")
             region      = session.get("region", region)
