@@ -53,7 +53,7 @@ try:
         try:
             _pytesseract_module.get_tesseract_version()
             return True
-        except Exception:
+        except (OSError, EnvironmentError, FileNotFoundError):
             return False
 
     import pytesseract
@@ -712,12 +712,13 @@ def create_annotated_image(filepath: str, risks: dict, violations: dict) -> byte
                         sev = severity_map.get(kw, "Medium")
                         color = COLORS.get(sev, COLORS["Medium"])
                         x, y, w, h = wp["x"], wp["y"], wp["w"], wp["h"]
-                        # Clamp all coordinates to image boundaries
+                        # Clamp all coordinates to image boundaries and skip zero-area rects
                         x1 = max(0, x - 2)
                         y1 = max(0, y - 2)
                         x2 = min(img.width,  x + w + 2)
                         y2 = min(img.height, y + h + 2)
-                        draw_orig.rectangle([x1, y1, x2, y2], fill=color)
+                        if x2 > x1 and y2 > y1:
+                            draw_orig.rectangle([x1, y1, x2, y2], fill=color)
                         break
 
         # Build annotation panel
@@ -1075,7 +1076,8 @@ def analyze():
         annotated_ext_out = "pdf"
 
     # ── Store session ──
-    session_id = uuid.uuid4().hex
+    # uuid4().hex returns lowercase hex in Python, but we explicitly lower() to be safe
+    session_id = uuid.uuid4().hex.lower()
     _sessions[session_id] = {
         "text":             text,
         "filename":         filename,
